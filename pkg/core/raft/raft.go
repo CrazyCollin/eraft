@@ -231,7 +231,7 @@ func (raft *Raft) replicatorOneRound(peer *RaftClientEnd) {
 
 		if snapShotResp != nil {
 			if raft.role == LEADER && raft.curTerm == snapShotReq.Term {
-				if snapShotResp.Term < raft.curTerm {
+				if snapShotResp.Term > raft.curTerm {
 					raft.ChangeRole(FOLLOWER)
 					raft.curTerm = snapShotReq.Term
 					raft.votedFor = -1
@@ -270,7 +270,7 @@ func (raft *Raft) replicatorOneRound(peer *RaftClientEnd) {
 			if resp != nil {
 				if resp.Success {
 					log.MainLogger.Debug().Msgf("send heart beat to %s success", peer.addr)
-					raft.matchIdx[peer.id] = int(appendEntReq.PrevLogIndex) + len(appendEntReq.Entries)
+					raft.matchIdx[peer.id] = int(raft.logs.lastIdx)
 					raft.nextIdx[peer.id] = raft.matchIdx[peer.id] + 1
 					raft.advanceCommitIndexForLeader()
 				} else {
@@ -330,7 +330,7 @@ func (raft *Raft) HandleAppendEntries(req *pb.AppendEntriesRequest, resp *pb.App
 		resp.Term, resp.Success = raft.curTerm, false
 		lastIndex := int64(raft.logs.lastIdx)
 		if lastIndex < req.PrevLogIndex {
-			log.MainLogger.Debug().Msgf("log confict with term %d, index %d", -1, lastIndex+1)
+			log.MainLogger.Debug().Msgf("log confict with term %d, index %d", resp.Term, lastIndex+1)
 			resp.ConflictIndex, resp.ConflictTerm = lastIndex+1, -1
 		} else {
 			firstIndex := int64(raft.logs.firstIdx)
@@ -346,8 +346,10 @@ func (raft *Raft) HandleAppendEntries(req *pb.AppendEntriesRequest, resp *pb.App
 
 	firstIndex := int64(raft.logs.firstIdx)
 	for index, entry := range req.Entries {
-		if int(entry.Index-firstIndex) >= raft.logs.LogItemCount() || raft.logs.GetEntry(entry.Index-firstIndex).Term != entry.Term {
-			raft.logs.EraseAfter(entry.Index-firstIndex, true)
+		// if int(entry.Index-firstIndex) >= raft.logs.LogItemCount() || raft.logs.GetEntry(entry.Index-firstIndex).Term != entry.Term {
+		// 	raft.logs.EraseAfter(entry.Index-firstIndex, true)
+		if int(entry.Index-firstIndex) >= raft.logs.LogItemCount() || raft.logs.GetEntry(entry.Index).Term != entry.Term {
+			raft.logs.EraseAfter(entry.Index, true)
 			for _, newEnt := range req.Entries[index:] {
 				raft.logs.Append(newEnt)
 			}
@@ -489,9 +491,9 @@ func (raft *Raft) HandleInstallSnapshot(request *pb.InstallSnapshotRequest, resp
 	raft.ChangeRole(FOLLOWER)
 	raft.electionTimer.Reset(time.Millisecond * time.Duration(MakeAnRandomElectionTimeout(int(raft.baseElecTimeout))))
 
-	if request.LastIncludedIndex <= raft.commitIdx {
-		return
-	}
+	// if request.LastIncludedIndex <= raft.commitIdx {
+	// 	return
+	// }
 
 	go func() {
 		raft.applyCh <- &pb.ApplyMsg{
@@ -590,7 +592,7 @@ func (raft *Raft) GetLogCount() int {
 // MatchLog is log matched
 //
 func (raft *Raft) MatchLog(term, index int64) bool {
-	return index <= int64(raft.logs.lastIdx) &&
+	return index <= int64(raft.logs.lastIdx) && index >= int64(raft.logs.firstIdx) &&
 		raft.logs.GetEntry(index).Term == uint64(term)
 }
 
@@ -633,7 +635,7 @@ func (raft *Raft) CondInstallSnapshot(lastIncluedTerm int, lastIncludedIndex int
 		log.MainLogger.Debug().Msgf("install snapshot del old log")
 		// raft.logs.EraseBeforeWithDel(int64(lastIncludedIndex) - int64(raft.logs.firstIdx))
 		raft.logs.EraseBeforeWithDel(int64(lastIncludedIndex))
-		// raft.logs.SetEntFirstData([]byte{})
+		raft.logs.SetEntFirstData([]byte{})
 	}
 
 	raft.logs.SetEntFirstTermAndIndex(int64(lastIncluedTerm), int64(lastIncludedIndex))
@@ -662,7 +664,7 @@ func (raft *Raft) Snapshot(index int, snapshot []byte) {
 	}
 	log.MainLogger.Debug().Msgf("take a snapshot, index:%d", index)
 	raft.logs.EraseBeforeWithDel(int64(index))
-	// raft.logs.SetEntFirstData([]byte{})
+	raft.logs.SetEntFirstData([]byte{})
 	log.MainLogger.Debug().Msgf("del log entry before idx %d", index)
 	raft.isSnapshoting = false
 	raft.logs.PersisSnapshot(snapshot)

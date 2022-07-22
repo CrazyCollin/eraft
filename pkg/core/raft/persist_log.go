@@ -86,6 +86,7 @@ func (rfLog *RaftLog) GetEnt(index int64) *pb.Entry {
 		log.MainLogger.Debug().Msgf("get log entry with id %d error! fristlog index is %d, lastlog index is %d\n", int64(index), rfLog.firstIdx, rfLog.lastIdx)
 		panic(err)
 	}
+	log.MainLogger.Debug().Msgf("get log index: %d success\n", index)
 	return DecodeEntry(encodeValue)
 }
 
@@ -163,6 +164,12 @@ func (rfLog *RaftLog) EraseBeforeWithDel(idx int64) error {
 		log.MainLogger.Debug().Msgf("del log with id %d success", i)
 	}
 	rfLog.firstIdx = uint64(idx)
+	// keys, _, err := rfLog.dbEng.GetPrefixRangeKvs(consts.RAFTLOG_PREFIX)
+	// if err != nil {
+	// 	log.MainLogger.Debug().Msgf("GetPrefixRangeKvs err")
+	// 	panic(err)
+	// }
+	// log.MainLogger.Debug().Msgf("After erase log, have %d keys :%s", len(keys), keys)
 	log.MainLogger.Debug().Msgf("After erase log, firstIdx: %d, lastIdx: %d\n", rfLog.firstIdx, rfLog.lastIdx)
 	return nil
 }
@@ -253,7 +260,7 @@ func (rfLog *RaftLog) SetEntFirstTermAndIndex(term, index int64) error {
 	}
 	// del olf first ent
 	if err := rfLog.dbEng.Del(EncodeRaftLogKey(firstIdx)); err != nil {
-		return err
+		panic(err)
 	}
 	ent := DecodeEntry(encodeValue)
 	ent.Term = uint64(term)
